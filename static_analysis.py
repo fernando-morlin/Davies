@@ -1,7 +1,7 @@
 """
 Static analysis module using Davies' method.
 """
-from sage.all import vector, QQ, RDF, N, matrix  # Added matrix import
+from sage.all import vector, QQ, RDF, N, matrix, SR  # Added SR
 from common_utils import Mechanism, get_constraints_for_joint_type, format_vector
 from graph_utils import (
     build_coupling_graph, get_incidence_matrix,
@@ -20,11 +20,12 @@ def print_step(step_name, outputs=None):
         for key, value in outputs.items():
             print(f"  → {key}: {value}")
 
-def compute_unit_wrench(joint_id, constraint_index, mechanism, coord_system, external_actions, lambda_dim=3):
+def compute_unit_wrench(joint_id, constraint_index, mechanism, coord_system, external_actions, lambda_dim=3, ring=QQ):
     """Step 4a (Static): Compute Unit Wrench ˆ$^A$ for a specific constraint"""
     joint_type = mechanism.joint_types[joint_id]
     geom = mechanism.geometry.get(joint_id, {})
-    point = geom.get('point', vector(QQ, [0, 0])) # Planar point Px, Py
+    point_coords = geom.get('point', [0, 0])  # Planar point Px, Py
+    point = vector(ring, point_coords[:2])  # Use specified ring for point
     Px, Py = point[0], point[1]
 
     if lambda_dim != 3:
@@ -34,59 +35,50 @@ def compute_unit_wrench(joint_id, constraint_index, mechanism, coord_system, ext
     cp = get_constraints_for_joint_type(joint_type, lambda_dim)
     ca = external_actions.get(joint_id, 0)
 
-    unit_wrench = vector(QQ, [0, 0, 0]) # Initialize [Tz, Rx, Ry]
+    unit_wrench = vector(ring, [0] * lambda_dim)  # Initialize with specified ring
 
     # Determine which constraint this index refers to (passive first, then active)
-    if constraint_index < cp: # Passive constraint
-        # Planar: Passive constraints are typically Rx, Ry for R-joint; Rv, Tz for P-joint
+    if constraint_index < cp:  # Passive constraint
         if joint_type == 'revolute':
-            if constraint_index == 0: # Rx constraint
-                # Force Rx=1 at P; Tz = -Py*Rx = -Py
-                unit_wrench = vector(QQ, [-Py, 1, 0])
-            elif constraint_index == 1: # Ry constraint
-                # Force Ry=1 at P; Tz = Px*Ry = Px
-                unit_wrench = vector(QQ, [Px, 0, 1])
+            if constraint_index == 0:  # Rx constraint
+                unit_wrench = vector(ring, [-Py, 1, 0])
+            elif constraint_index == 1:  # Ry constraint
+                unit_wrench = vector(ring, [Px, 0, 1])
         elif joint_type == 'prismatic':
-            direction = geom.get('direction', vector(QQ, [1, 0])) # ux, uy
-            perp_dir = vector(QQ, [-direction[1], direction[0]]) # vx, vy = -uy, ux
-            if constraint_index == 0: # Force constraint Rv along perp_dir
-                 # Force R = perp_dir = [-uy, ux]; Tz = Px*Ry - Py*Rx = Px*ux + Py*uy
-                 unit_wrench = vector(QQ, [Px*perp_dir[1] - Py*perp_dir[0], perp_dir[0], perp_dir[1]])
-                 unit_wrench = vector(QQ, [Px*direction[0] + Py*direction[1], -direction[1], direction[0]]) # Simpler cross product form
-            elif constraint_index == 1: # Torque constraint Tz
-                 # Pure torque Tz=1
-                 unit_wrench = vector(QQ, [1, 0, 0])
-        # Add other passive constraint definitions
+            dir_coords = geom.get('direction', [1, 0])  # ux, uy
+            direction = vector(ring, dir_coords[:2])
+            perp_dir = vector(ring, [-direction[1], direction[0]])  # vx, vy = -uy, ux
+            if constraint_index == 0:  # Force constraint Rv along perp_dir
+                unit_wrench = vector(ring, [Px * perp_dir[1] - Py * perp_dir[0], perp_dir[0], perp_dir[1]])
+            elif constraint_index == 1:  # Torque constraint Tz
+                unit_wrench = vector(ring, [1, 0, 0])
         else:
-             print(f"Warning: Passive unit wrench for joint type '{joint_type}' index {constraint_index} not implemented.")
-
-    else: # Active constraint (external action treated as constraint)
+            print(f"Warning: Passive unit wrench for joint type '{joint_type}' index {constraint_index} not implemented.")
+    else:  # Active constraint (external action treated as constraint)
         active_constraint_idx = constraint_index - cp
-        # Assume active constraints are Tz for simplicity (needs better definition)
-        if active_constraint_idx == 0: # Assume first active is Tz
-             # Pure torque Tz=1
-             unit_wrench = vector(QQ, [1, 0, 0])
+        if active_constraint_idx == 0:  # Assume first active is Tz
+            unit_wrench = vector(ring, [1, 0, 0])
         else:
-             print(f"Warning: Active unit wrench index {active_constraint_idx} for joint '{joint_id}' not implemented.")
+            print(f"Warning: Active unit wrench index {active_constraint_idx} for joint '{joint_id}' not implemented.")
 
     return unit_wrench
 
-def assemble_unit_wrench_matrix(mechanism, gc_edges, ga_edge_map, total_C, external_actions, lambda_dim=3):
+def assemble_unit_wrench_matrix(mechanism, gc_edges, ga_edge_map, total_C, external_actions, lambda_dim=3, ring=QQ):
     """Step 4b (Static): Assemble Unit Wrench Matrix [ÂD]"""
-    A_hat_D = matrix(QQ, lambda_dim, total_C)
+    A_hat_D = matrix(ring, lambda_dim, total_C)  # Use specified ring
     unit_wrenches_list = []
 
-    coord_system = {'origin': vector(QQ, [0, 0, 0])} # Simplified
+    coord_system = {'origin': vector(ring, [0] * lambda_dim)}  # Use specified ring
 
     # Ensure column order matches ga_edge_map
     ga_col_to_joint_constraint = {}
     for joint_id, indices in ga_edge_map.items():
         for i, col_idx in enumerate(indices):
-            ga_col_to_joint_constraint[col_idx] = (joint_id, i) # Map col to joint and constraint index
+            ga_col_to_joint_constraint[col_idx] = (joint_id, i)  # Map col to joint and constraint index
 
     for col_idx in range(total_C):
         joint_id, constraint_index = ga_col_to_joint_constraint[col_idx]
-        unit_wrench = compute_unit_wrench(joint_id, constraint_index, mechanism, coord_system, external_actions, lambda_dim)
+        unit_wrench = compute_unit_wrench(joint_id, constraint_index, mechanism, coord_system, external_actions, lambda_dim, ring)
         A_hat_D[:, col_idx] = unit_wrench
         unit_wrenches_list.append(unit_wrench)
 
@@ -174,7 +166,7 @@ def save_static_report_to_file(report, filename, detailed=True, precision=6):
         f.write(format_static_report(report, detailed, precision))
     print(f"Static report saved to {filename}")
 
-def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, external_actions=None, lambda_dim=3, generate_report=False):
+def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, external_actions=None, lambda_dim=3, generate_report=False, ring=QQ):
     """
     Main function implementing Davies' method for static analysis.
 
@@ -188,6 +180,7 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
                           Defaults to 0 if None. Used for expanding QA.
         lambda_dim: Dimension of the workspace (e.g., 3 for planar, 6 for spatial).
         generate_report: Whether to generate a detailed report dictionary.
+        ring: The SageMath ring (QQ, RDF, SR) for calculations. Defaults to QQ.
 
     Returns:
         Psi_total: Vector of all constraint variable magnitudes (forces/torques).
@@ -195,7 +188,7 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
         GA_Edges_Ordered: List of GA constraint identifiers corresponding to Psi_total.
         report: Dictionary containing detailed information about the analysis (if generate_report=True).
     """
-    print("\n=== Davies Static Analysis ===\n")
+    print(f"\n=== Davies Static Analysis (Ring: {ring}) ===\n")
     report = {} if generate_report else None
     
     if external_actions is None:
@@ -204,13 +197,14 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
     if generate_report:
         report['mechanism'] = mechanism
         report['external_actions'] = external_actions
+        report['calculation_ring'] = ring  # Store the ring used
 
     # Step 1 & 2 (GC, IC, QC): Same as kinematics
     GC = build_coupling_graph(mechanism)
     IC, gc_nodes, gc_edges = get_incidence_matrix(GC)
     num_gc_nodes = len(gc_nodes)
     num_gc_edges = len(gc_edges)
-    QC = get_cutset_matrix(IC)
+    QC = get_cutset_matrix(IC, ring=ring)
     print_step("1 & 2: Building GC, IC, QC", {
         "Graph": f"GC: {num_gc_nodes} nodes, {num_gc_edges} edges",
         "Matrix": f"QC dimensions: {QC.dimensions()}"
@@ -223,8 +217,8 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
         report['gc_edges_ordered'] = gc_edges
 
     # Step 3: Expand [QC] to Action Graph Cut-set Matrix [QA]
-    QA, ga_edge_map, total_C = expand_cutset_matrix_for_action_graph(QC, mechanism, gc_edges, external_actions)
-    num_cuts = QA.nrows() # k
+    QA, ga_edge_map, total_C = expand_cutset_matrix_for_action_graph(QC, mechanism, gc_edges, external_actions, ring=ring)
+    num_cuts = QA.nrows()  # k
     print_step("3: Expanding [QC] to [QA] for Action Graph", {
         "Dimensions": f"QA dimensions: {num_cuts} cuts, {total_C} total constraints (C)"
     })
@@ -235,23 +229,21 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
 
     # Create ordered list of GA 'edges' (constraints)
     GA_Edges_Ordered = [None] * total_C
-    coord_system = {'origin': vector(QQ, [0, 0, 0])} # Simplified
+    coord_system = {'origin': vector(ring, [0] * lambda_dim)}  # Use specified ring
     for joint_id, indices in ga_edge_map.items():
          cp = get_constraints_for_joint_type(mechanism.joint_types[joint_id], lambda_dim)
          ca = external_actions.get(joint_id, 0)
          for i, col_idx in enumerate(indices):
-              # Generate a descriptive ID for the constraint
-              constraint_name = f"{joint_id}_constraint_{i}" # Placeholder name
-              if i < cp: # Passive
-                  # Try to infer name based on joint type
+              constraint_name = f"{joint_id}_constraint_{i}"  # Placeholder name
+              if i < cp:  # Passive
                   if mechanism.joint_types[joint_id] == 'revolute':
-                       if i==0: constraint_name = f"{joint_id}_Rx"
-                       elif i==1: constraint_name = f"{joint_id}_Ry"
+                       if i == 0: constraint_name = f"{joint_id}_Rx"
+                       elif i == 1: constraint_name = f"{joint_id}_Ry"
                   elif mechanism.joint_types[joint_id] == 'prismatic':
-                       if i==0: constraint_name = f"{joint_id}_Rv" # Perpendicular force
-                       elif i==1: constraint_name = f"{joint_id}_Tz"
-              else: # Active
-                  constraint_name = f"{joint_id}_Tz_active" # Assume Tz for active constraints
+                       if i == 0: constraint_name = f"{joint_id}_Rv"  # Perpendicular force
+                       elif i == 1: constraint_name = f"{joint_id}_Tz"
+              else:  # Active
+                  constraint_name = f"{joint_id}_Tz_active"  # Assume Tz for active constraints
                   
               GA_Edges_Ordered[col_idx] = constraint_name
     
@@ -260,7 +252,7 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
 
     # Step 4: Assemble Unit Wrench Matrix [ÂD]
     A_hat_D, unit_wrenches_ordered = assemble_unit_wrench_matrix(
-        mechanism, gc_edges, ga_edge_map, total_C, external_actions, lambda_dim
+        mechanism, gc_edges, ga_edge_map, total_C, external_actions, lambda_dim, ring=ring
     )
     print_step("4: Assembling Unit Wrench Matrix [ÂD]", {
         "Dimensions": f"ÂD dimensions: {A_hat_D.dimensions()}"
@@ -271,7 +263,7 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
         report['unit_wrenches_ordered'] = unit_wrenches_ordered
 
     # Step 5: Assemble Network Action Matrix [ÂN]
-    A_hat_N = assemble_network_matrix(A_hat_D, QA, lambda_dim)
+    A_hat_N = assemble_network_matrix(A_hat_D, QA, lambda_dim, ring=ring)
     print_step("5: Assembling Network Action Matrix [ÂN]", {
         "Dimensions": f"ÂN dimensions: {A_hat_N.dimensions()}"
     })
@@ -280,7 +272,7 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
         report['network_action_matrix'] = A_hat_N
 
     # Step 6: Handle Sub-Restriction (Rank Reduction)
-    A_hat_N_reduced, rank_a = select_independent_rows(A_hat_N)
+    A_hat_N_reduced, rank_a = select_independent_rows(A_hat_N, ring=ring)
     print_step("6: Reducing ÂN to independent rows", {
         "Rank": f"Rank a = {rank_a}",
         "Reduced Dimensions": f"Reduced ÂN dimensions: {A_hat_N_reduced.dimensions()}"
@@ -306,7 +298,9 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
     # Create mapping from descriptive ID to column index
     constraint_id_to_col = {name: idx for idx, name in enumerate(GA_Edges_Ordered)}
 
-    for constraint_id, value in zip(primary_constraint_ids, primary_values):
+    primary_values_ring = [ring(v) for v in primary_values]
+
+    for constraint_id, value in zip(primary_constraint_ids, primary_values_ring):
          if constraint_id not in constraint_id_to_col:
               print(f"Warning: Primary constraint ID '{constraint_id}' not found in generated constraints: {GA_Edges_Ordered}")
               continue
@@ -323,7 +317,6 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
         A_hat_N_S, A_hat_N_P, secondary_indices = partition_system_matrix(
             A_hat_N_reduced, total_C, primary_indices
         )
-        # Fix the missing f-string prefix
         print(f"  → Secondary: Secondary constraint indices (columns): {secondary_indices}")
         print(f"  → Matrix: ÂNS {A_hat_N_S.dimensions()}, ÂNP {A_hat_N_P.dimensions()}")
         
@@ -343,10 +336,9 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
         return None, None, report if generate_report else None
 
     # Step 8: Solve for Secondary Variables {ΨS}
-    Psi_P = vector(QQ, [primary_value_map[i] for i in primary_indices])
+    Psi_P = vector(ring, [primary_value_map[i] for i in primary_indices])
 
     try:
-        # Solve [ÂNS]{ΨS} = -[ÂNP]{ΨP}
         rhs = -A_hat_N_P * Psi_P
         Psi_S = A_hat_N_S.solve_right(rhs)
         
@@ -354,13 +346,13 @@ def davies_static_analysis(mechanism, primary_constraint_ids, primary_values, ex
             report['Psi_P'] = Psi_P
             report['Psi_S'] = Psi_S
             
-    except Exception as e: # Catch potential errors like non-invertible matrix
+    except Exception as e:
         print(f"Error solving system: {e}")
         print("ÂNS might be singular. Check mechanism constraints or primary variable choice.")
         return None, None, report if generate_report else None
 
     # Step 9: Combine Results {Ψ}
-    Psi_total = combine_magnitudes(Psi_P, Psi_S, primary_indices, secondary_indices, total_C)
+    Psi_total = combine_magnitudes(Psi_P, Psi_S, primary_indices, secondary_indices, total_C, ring=ring)
     
     if generate_report:
         report['Psi_total'] = Psi_total

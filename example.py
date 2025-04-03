@@ -1,9 +1,9 @@
 """Example demonstrating both kinematic and static analysis using Davies' method."""
 import os
-from sage.all import vector, QQ, RDF, pi, cos, sin, N
+from sage.all import vector, QQ, RDF, pi, cos, sin, N, SR, var
 from davies_method import (
     Mechanism, DaviesKinematicAnalysis, DaviesStaticAnalysis,
-    save_report_to_file, save_static_report_to_file
+    save_report_to_file, save_static_report_to_file, format_report, format_static_report
 )
 
 # Create reports directory if it doesn't exist
@@ -218,11 +218,126 @@ def example_slider_crank():
     
     return mechanism, Phi_solution, None  # Static analysis not verified for slider-crank
 
+def example_symbolic_fourbar():
+    """Run four-bar linkage example with symbolic dimensions/input."""
+    print_section_header("Symbolic Four-Bar Linkage Example")
+
+    # Define symbolic variables
+    var('L_ab, L_bc, L_cd, L_ad_x, L_ad_y, theta_a, omega_a')
+
+    # Create mechanism with symbolic geometry
+    print("Creating symbolic mechanism...")
+    mechanism = Mechanism()
+    mechanism.add_body("ground")
+    mechanism.add_body("link_ab")
+    mechanism.add_body("link_bc")
+    mechanism.add_body("link_cd")
+
+    # Joint positions defined symbolically
+    # Assume joint 'a' is at origin for simplicity here
+    # Joint 'd' is fixed relative to 'a'
+    # Joint 'b' depends on L_ab and theta_a (implicitly via analysis)
+    # Joint 'c' depends on other links (implicitly via analysis)
+    # NOTE: Davies method uses fixed geometry. For symbolic *positions*,
+    # a different approach (like loop closure equations) is usually needed.
+    # Here, we'll make the *lengths* symbolic, but define an initial numeric pose
+    # for calculating twists/wrenches, and use a symbolic input velocity.
+
+    # Let's use the verified four-bar geometry but make input velocity symbolic
+    # Define numeric parts using integers/fractions
+    ax_num, ay_num = 0, 0
+    # Create fractions using division rather than QQ(num, denom)
+    by_frac = QQ(35)/QQ(100)  # 0.35
+    cx_frac = QQ(45)/QQ(100)  # 0.45
+    cy_frac = QQ(15)/QQ(100)  # 0.15
+    dx_frac = QQ(40)/QQ(100)  # 0.40
+    
+    # Create vectors directly over SR, letting it coerce numeric types
+    mechanism.add_joint("a", "ground", "link_ab", "revolute", 1, {
+        'point': vector(SR, [0, 0, 0])
+    })
+    mechanism.add_joint("b", "link_ab", "link_bc", "revolute", 1, {
+        'point': vector(SR, [0, by_frac, 0])
+    })
+    mechanism.add_joint("c", "link_bc", "link_cd", "revolute", 1, {
+        'point': vector(SR, [cx_frac, cy_frac, 0])
+    })
+    mechanism.add_joint("d", "link_cd", "ground", "revolute", 1, {
+        'point': vector(SR, [dx_frac, 0, 0])
+    })
+
+    print(f"Symbolic mechanism created with {len(mechanism.bodies)} bodies and {len(mechanism.joints)} joints.")
+
+    # ===== Symbolic Kinematic Analysis =====
+    print_step_header("Running Symbolic Kinematic Analysis")
+
+    primary_joint_ids = ['d']
+    primary_vals = [omega_a] # Symbolic input velocity
+
+    # Run kinematic analysis using the Symbolic Ring (SR)
+    Phi_solution, ordered_gm_edges, kin_report = DaviesKinematicAnalysis(
+        mechanism, primary_joint_ids, primary_vals,
+        lambda_dim=3, generate_report=True, ring=SR # Specify SR
+    )
+
+    if Phi_solution is not None:
+        print("\nSymbolic Kinematic Analysis Results (Velocities):")
+        results = {}
+        for i, val in enumerate(Phi_solution):
+            edge_label = ordered_gm_edges[i][2]
+            # Check if val is symbolic before simplifying
+            if hasattr(val, 'simplify_full'):
+                 results[edge_label] = val.simplify_full() # Simplify symbolic results
+            else:
+                 results[edge_label] = val # Keep as is if not symbolic (e.g., numeric result from SR)
+            print(f"  ω_{edge_label:<5} = {results[edge_label]}")
+
+        # Optionally substitute numerical values into symbolic results
+        try:
+            # Ensure substitution happens only on symbolic elements
+            subs_results = {}
+            # Use a floating point number directly instead of QQ for substitution
+            omega_a_val = 0.15  # This avoids the QQ(num,den) syntax
+            for k, v in results.items():
+                if hasattr(v, 'subs'):
+                    subs_results[k] = v.subs({omega_a: omega_a_val})
+                else:
+                    subs_results[k] = v # Keep numeric results as they are
+
+            print("\nResults with omega_a = 0.15 substituted:")
+            for joint_id in ['a', 'b', 'c', 'd']:
+                 # Handle potential errors during numerical evaluation
+                 try:
+                     print(f"  ω_{joint_id}: {N(subs_results[joint_id], digits=8)} rad/s")
+                 except TypeError as e_num:
+                     print(f"  ω_{joint_id}: Could not evaluate numerically - {subs_results[joint_id]}")
+                     
+        except Exception as e:
+            print(f"\nCould not substitute numerical values: {e}")
+
+        # Save symbolic report
+        save_report_to_file(kin_report, os.path.join(REPORTS_DIR, "symbolic_fourbar_kinematic_report.txt"), detailed=True)
+        # Also print report to console
+        print("\n--- Symbolic Kinematic Report ---")
+        # Use detailed=True for symbolic report formatting
+        print(format_report(kin_report, detailed=True, precision=8))
+        print("--- End Report ---")
+
+    else:
+        print("Symbolic kinematic analysis failed.")
+
+    # Static symbolic analysis could be added similarly if needed
+    # ...
+
+    return mechanism, Phi_solution, None
+
+
 if __name__ == "__main__":
     print_section_header("Davies' Method Examples", char='=')
     
     # Run examples
     fourbar_mech, fourbar_kin, fourbar_static = user_verified_fourbar_example()
     slider_mech, slider_kin, _ = example_slider_crank()
-    
+    symbolic_mech, symbolic_kin, _ = example_symbolic_fourbar()
+
     print("\nExamples completed. Reports saved to 'reports' directory.")

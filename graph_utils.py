@@ -1,7 +1,7 @@
 """
 Graph utilities for Davies' method implementation.
 """
-from sage.all import Graph, matrix, QQ, identity_matrix, block_matrix
+from sage.all import Graph, matrix, QQ, SR, identity_matrix, block_matrix
 
 def build_coupling_graph(mechanism):
     """Step 1a: Build the Coupling Graph (GC)"""
@@ -36,13 +36,14 @@ def get_incidence_matrix(graph):
         IC[row_v, j] = -1  # Entering v
     return IC, nodes, edges
 
-def get_cutset_matrix(IC):
+def get_cutset_matrix(IC, ring=QQ):
     """Step 1e: Get Cut-set Matrix [QC] from [IC] via echelon form"""
-    # Perform Gaussian elimination (row reduction)
+    # Perform Gaussian elimination (row reduction) over QQ first
     echelon_form = IC.echelon_form()
     # Remove the last row (guaranteed to be zero for a connected graph)
-    QC = echelon_form[:-1, :]
-    return QC
+    QC_QQ = echelon_form[:-1, :]
+    # Change to the desired ring if necessary
+    return QC_QQ.change_ring(ring)
 
 def find_pivot_columns(matrix_in_ref):
     """Find pivot columns in a matrix that is in row echelon form."""
@@ -55,25 +56,27 @@ def find_pivot_columns(matrix_in_ref):
                 break
     return pivots
 
-def get_circuit_matrix(QC, num_edges, num_nodes):
+def get_circuit_matrix(QC, num_edges, num_nodes, ring=QQ):
     """Step 1f & 1g: Get Circuit Matrix [BC] from [QC] using orthogonality"""
     k = num_nodes - 1  # Number of cuts = number of branches
     l = num_edges - k  # Number of circuits = number of chords
 
-    if QC.ncols() != num_edges or QC.nrows() != k:
+    # Perform calculations using QQ for pivot finding robustness
+    QC_QQ = QC.change_ring(QQ)
+
+    if QC_QQ.ncols() != num_edges or QC_QQ.nrows() != k:
         raise ValueError("QC dimensions do not match expected values")
 
-    # Find pivot columns to identify branches and chords implicitly
-    pivots = find_pivot_columns(QC)  # Use our new function instead of pivot_columns()
+    # Find pivot columns to identify branches and chords implicitly using QQ
+    pivots = find_pivot_columns(QC_QQ)
     if len(pivots) != k:
-        # This might happen if the graph isn't connected, handle appropriately
         raise ValueError(f"Could not find {k} pivot columns in QC (found {len(pivots)}). Graph might not be connected?")
 
     non_pivots = sorted(list(set(range(num_edges)) - set(pivots)))
     col_order = list(pivots) + non_pivots  # Branches first, then chords
 
-    # Reorder QC columns to get [[Ub] | [Qc]] form
-    QC_reordered = QC.matrix_from_columns(col_order)
+    # Reorder QC columns to get [[Ub] | [Qc]] form over QQ
+    QC_reordered = QC_QQ.matrix_from_columns(col_order)
     Ub = QC_reordered[:, :k]
     Qc = QC_reordered[:, k:]
 
@@ -81,32 +84,36 @@ def get_circuit_matrix(QC, num_edges, num_nodes):
     if Ub != identity_matrix(QQ, k):
         print("Warning: QC matrix pivots did not form Identity. Check echelon form.")
 
-    # Orthogonality: [Bb] = -[Qc]^T
+    # Orthogonality: [Bb] = -[Qc]^T (over QQ)
     Bb = -Qc.transpose()  # Dimensions: l x k
 
-    # Form [BC] = [[Bb] | [Uc]]
+    # Form [BC] = [[Bb] | [Uc]] over QQ
     Uc = identity_matrix(QQ, l)  # Dimensions: l x l
-    BC_reordered = block_matrix([[Bb, Uc]], subdivide=False)  # Dimensions: l x e
+    BC_reordered = block_matrix(QQ, [[Bb, Uc]], subdivide=False)  # Dimensions: l x e
 
-    # Apply the *inverse* column permutation to get BC in the original edge order
+    # Apply the *inverse* column permutation to get BC in the original edge order over QQ
     inv_col_order = [0] * num_edges
     for i, original_index in enumerate(col_order):
         inv_col_order[original_index] = i
-    BC = BC_reordered.matrix_from_columns(inv_col_order)  # Apply inverse permutation
+    BC_QQ = BC_reordered.matrix_from_columns(inv_col_order)  # Apply inverse permutation
 
-    return BC
+    # Change to the desired final ring
+    return BC_QQ.change_ring(ring)
 
-def expand_circuit_matrix_for_motion_graph(BC, mechanism, gc_edges):
+def expand_circuit_matrix_for_motion_graph(BC, mechanism, gc_edges, ring=QQ):
     """Step 4: Expand [BC] columns for Motion Graph [BM]"""
     new_cols = []
     gm_edge_map = {}  # Map original joint_id to list of new GM edge indices
     current_gm_col = 0
 
+    # Ensure BC is over the target ring before extracting columns
+    BC_ring = BC.change_ring(ring)
+
     for gc_col_idx, gc_edge in enumerate(gc_edges):
         joint_id = gc_edge[2]
         dof = mechanism.joint_dof.get(joint_id, 1)  # Get DOF with default=1
-        
-        original_col = BC.column(gc_col_idx)
+
+        original_col = BC_ring.column(gc_col_idx)  # Extract column from ring-converted BC
         gm_edge_indices_for_joint = []
         for _ in range(dof):
             new_cols.append(original_col)
@@ -114,25 +121,28 @@ def expand_circuit_matrix_for_motion_graph(BC, mechanism, gc_edges):
             current_gm_col += 1
         gm_edge_map[joint_id] = gm_edge_indices_for_joint
 
-    # Create BM by concatenating the columns
+    # Create BM by concatenating the columns over the specified ring
     if not new_cols:  # Handle case with no edges
-        return matrix(QQ, BC.nrows(), 0), {}
+        return matrix(ring, BC_ring.nrows(), 0), {}
 
     # Construct matrix from columns
-    BM = matrix(QQ, BC.nrows(), len(new_cols))
+    BM = matrix(ring, BC_ring.nrows(), len(new_cols))  # Use specified ring
     for i, col in enumerate(new_cols):
         BM.set_column(i, col)
 
     return BM, gm_edge_map
 
-def expand_cutset_matrix_for_action_graph(QC, mechanism, gc_edges, external_actions=None):
+def expand_cutset_matrix_for_action_graph(QC, mechanism, gc_edges, external_actions=None, ring=QQ):
     """Step 3b (Static): Expand [QC] columns for Action Graph [QA]"""
     from common_utils import get_constraints_for_joint_type
-    
+
     if external_actions is None:
         external_actions = {}  # Dict: joint_id -> number of active constraints 'ca'
 
-    num_rows = QC.nrows()
+    # Ensure QC is over the target ring before extracting columns
+    QC_ring = QC.change_ring(ring)
+    num_rows = QC_ring.nrows()
+
     new_cols = []
     ga_edge_map = {}  # Map original joint_id to list of new GA edge indices (constraints)
     current_ga_col = 0
@@ -149,7 +159,7 @@ def expand_cutset_matrix_for_action_graph(QC, mechanism, gc_edges, external_acti
         ca = external_actions.get(joint_id, 0)
         c_total_joint = cp + ca
 
-        original_col_vector = QC.column(gc_col_idx)
+        original_col_vector = QC_ring.column(gc_col_idx)  # Extract column from ring-converted QC
         ga_edge_indices_for_joint = []
         for _ in range(c_total_joint):
             new_cols.append(original_col_vector)
@@ -159,10 +169,10 @@ def expand_cutset_matrix_for_action_graph(QC, mechanism, gc_edges, external_acti
         total_C += c_total_joint
 
     if not new_cols:  # Handle case with no edges/constraints
-        return matrix(QQ, num_rows, 0), {}, 0
+        return matrix(ring, num_rows, 0), {}, 0
 
-    # Create QA directly using column vectors
-    QA = matrix(QQ, num_rows, total_C)
+    # Create QA directly using column vectors over the specified ring
+    QA = matrix(ring, num_rows, total_C)  # Use specified ring
     for col_idx, col_vector in enumerate(new_cols):
         QA.set_column(col_idx, col_vector)
 

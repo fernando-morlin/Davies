@@ -40,21 +40,29 @@ def format_vector(v, precision=4):
     try:
         components = []
         for x in v:
-            # Check if x is symbolic
-            if x in SR:
+            # Check if x is symbolic using the parent ring
+            if hasattr(x, 'parent') and x.parent() is SR:
                 components.append(str(x))
-                continue
-                
-            try:
-                x_num = N(x, prec=53)
-            except TypeError:
-                x_num = x
-            if abs(x_num) < 1e-10:
-                components.append("0")
             else:
-                components.append(f"{x_num:.{precision}f}")
+                # Attempt numerical conversion and formatting
+                try:
+                    x_num = N(x, prec=53) # Use standard precision for check
+                    if abs(x_num) < 1e-10:
+                        components.append("0")
+                    else:
+                        # Format with requested precision
+                        components.append(f"{N(x, digits=precision+2):.{precision}f}")
+                except TypeError: # Handle cases where N() fails (like QQ)
+                    if abs(float(x)) < 1e-10:
+                         components.append("0")
+                    else:
+                         # Try formatting QQ directly if possible
+                         try:
+                              components.append(f"{x:.{precision}f}")
+                         except TypeError:
+                              components.append(str(x)) # Fallback to string
         return f"({', '.join(components)})"
-    except TypeError:
+    except TypeError: # Fallback for non-iterable v
         return str(v)
 
 def get_dof_for_joint_type(joint_type, lambda_dim=3):
