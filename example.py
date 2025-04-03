@@ -331,6 +331,98 @@ def example_symbolic_fourbar():
 
     return mechanism, Phi_solution, None
 
+def example_symbolic_fourbar_full():
+    """Run four-bar linkage example with fully symbolic joint positions and input."""
+    print_section_header("Fully Symbolic Four-Bar Linkage Example")
+
+    # Define symbolic variables for joint positions and input velocity
+    var('a_x, a_y, b_x, b_y, c_x, c_y, d_x, d_y, omega_d')
+
+    # Create mechanism with symbolic geometry
+    print("Creating fully symbolic mechanism...")
+    mechanism = Mechanism()
+    mechanism.add_body("ground")
+    mechanism.add_body("link_ab")
+    mechanism.add_body("link_bc")
+    mechanism.add_body("link_cd")
+    
+    # Define all joints with symbolic positions
+    mechanism.add_joint("a", "ground", "link_ab", "revolute", 1, {
+        'point': vector(SR, [a_x, a_y, 0])
+    })
+    mechanism.add_joint("b", "link_ab", "link_bc", "revolute", 1, {
+        'point': vector(SR, [b_x, b_y, 0])
+    })
+    mechanism.add_joint("c", "link_bc", "link_cd", "revolute", 1, {
+        'point': vector(SR, [c_x, c_y, 0])
+    })
+    mechanism.add_joint("d", "link_cd", "ground", "revolute", 1, {
+        'point': vector(SR, [d_x, d_y, 0])
+    })
+
+    print(f"Fully symbolic mechanism created with {len(mechanism.bodies)} bodies and {len(mechanism.joints)} joints.")
+
+    # ===== Symbolic Kinematic Analysis =====
+    print_step_header("Running Fully Symbolic Kinematic Analysis")
+
+    primary_joint_ids = ['d']
+    primary_vals = [omega_d] # Symbolic input velocity
+    
+    # Run kinematic analysis using the Symbolic Ring (SR)
+    Phi_solution, ordered_gm_edges, kin_report = DaviesKinematicAnalysis(
+        mechanism, primary_joint_ids, primary_vals,
+        lambda_dim=3, generate_report=True, ring=SR
+    )
+
+    if Phi_solution is not None:
+        print("\nFully Symbolic Kinematic Analysis Results (Velocities):")
+        results = {}
+        for i, val in enumerate(Phi_solution):
+            edge_label = ordered_gm_edges[i][2]
+            # Check if val is symbolic before simplifying
+            if hasattr(val, 'simplify_full'):
+                 results[edge_label] = val.simplify_full() # Simplify symbolic results
+            else:
+                 results[edge_label] = val # Keep as is if not symbolic
+            print(f"  ω_{edge_label:<5} = {results[edge_label]}")
+
+        # Substitute sample values to verify the solution
+        try:
+            # Define sample values that match the verified four-bar
+            subs_dict = {
+                a_x: 0, a_y: 0,
+                b_x: 0, b_y: 0.35,
+                c_x: 0.45, c_y: 0.15,
+                d_x: 0.40, d_y: 0,
+                omega_d: 0.15
+            }
+            
+            subs_results = {}
+            for k, v in results.items():
+                if hasattr(v, 'subs'):
+                    subs_results[k] = v.subs(subs_dict)
+                else:
+                    subs_results[k] = v
+            
+            print("\nResults with sample geometry and omega_d = 0.15 substituted:")
+            for joint_id in ['a', 'b', 'c', 'd']:
+                try:
+                    print(f"  ω_{joint_id}: {N(subs_results[joint_id], digits=8)} rad/s")
+                except Exception as e_num:
+                    print(f"  ω_{joint_id}: Could not evaluate numerically - {subs_results[joint_id]}")
+        except Exception as e:
+            print(f"\nCould not substitute sample values: {e}")
+
+        # Save symbolic report
+        report_path = os.path.join(REPORTS_DIR, "fully_symbolic_fourbar_report.txt")
+        save_report_to_file(kin_report, report_path, detailed=True)
+        print(f"\nFully symbolic report saved to {report_path}")
+
+    else:
+        print("Fully symbolic kinematic analysis failed.")
+
+    return mechanism, Phi_solution, None
+
 
 if __name__ == "__main__":
     print_section_header("Davies' Method Examples", char='=')
@@ -339,5 +431,8 @@ if __name__ == "__main__":
     fourbar_mech, fourbar_kin, fourbar_static = user_verified_fourbar_example()
     slider_mech, slider_kin, _ = example_slider_crank()
     symbolic_mech, symbolic_kin, _ = example_symbolic_fourbar()
+    
+    # Run the fully symbolic four-bar example
+    fully_symbolic_mech, fully_symbolic_kin, _ = example_symbolic_fourbar_full()
 
     print("\nExamples completed. Reports saved to 'reports' directory.")

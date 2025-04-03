@@ -1,6 +1,6 @@
 # Davies' Method Implementation for Mechanism Analysis
 
-An implementation of Davies' method for analyzing planar mechanisms using SageMath. This library enables both kinematic and static analysis through a systematic graph-theory approach.
+An implementation of Davies' method for analyzing planar mechanisms using SageMath. This library enables both kinematic and static analysis through a systematic graph-theory approach, with support for both numeric and symbolic calculations.
 
 ## Quick Start
 
@@ -82,6 +82,50 @@ Psi, constraints, report = DaviesStaticAnalysis(
 )
 ```
 
+### 4. Symbolic Analysis
+
+Performs analysis using symbolic variables to produce exact parametric solutions:
+
+```python
+from sage.all import vector, SR, var
+from davies_method import Mechanism, DaviesKinematicAnalysis
+
+# Define symbolic variables
+var('a_x, a_y, b_x, b_y, c_x, c_y, d_x, d_y, omega_d')
+
+# Create mechanism with symbolic coordinates
+mechanism = Mechanism()
+mechanism.add_body("ground")
+mechanism.add_body("link_ab")
+mechanism.add_body("link_bc")
+mechanism.add_body("link_cd")
+
+# Define joints with symbolic positions
+mechanism.add_joint("a", "ground", "link_ab", "revolute", 1, {
+    'point': vector(SR, [a_x, a_y, 0])
+})
+mechanism.add_joint("b", "link_ab", "link_bc", "revolute", 1, {
+    'point': vector(SR, [b_x, b_y, 0])
+})
+mechanism.add_joint("c", "link_bc", "link_cd", "revolute", 1, {
+    'point': vector(SR, [c_x, c_y, 0])
+})
+mechanism.add_joint("d", "link_cd", "ground", "revolute", 1, {
+    'point': vector(SR, [d_x, d_y, 0])
+})
+
+# Run symbolic analysis (specify SR as the ring for calculations)
+Phi, edges, report = DaviesKinematicAnalysis(
+    mechanism, ['d'], [omega_d], lambda_dim=3, 
+    generate_report=True, ring=SR
+)
+
+# Results will be symbolic expressions in terms of defined variables
+for i, val in enumerate(Phi):
+    joint_name = edges[i][2]
+    print(f"ω_{joint_name} = {val.simplify_full()}")
+```
+
 ## Supported Joint Types
 
 ### Revolute Joint (R)
@@ -136,12 +180,20 @@ omega = QQ(1)    # Exact 1
 omega = QQ(1,2)  # Exact 1/2
 ```
 
-2. Consistent coordinate systems:
+2. Use symbolic calculation with `SR` for parametric analysis:
+```python
+from sage.all import SR, var
+var('omega_a')  # Define symbolic variable
+# Use ring=SR in analysis function
+Phi, edges, report = DaviesKinematicAnalysis(..., ring=SR)
+```
+
+3. Consistent coordinate systems:
 - Use right-handed coordinate system
 - Z-axis points out of plane
 - Define joint positions relative to global origin
 
-3. Mechanism topology:
+4. Mechanism topology:
 - Start with ground as body 0
 - Number bodies consistently
 - Verify joint connectivity
@@ -151,3 +203,4 @@ omega = QQ(1,2)  # Exact 1/2
 - Davies, T. H. "Mechanical Networks" (original paper)
 - Repository examples: See `example.py` and `fourbar_solver.py`
 - Generated reports in `reports/` directory after analysis
+- Symbolic examples: See `example_symbolic_fourbar()` and `example_symbolic_fourbar_full()` in `example.py`
