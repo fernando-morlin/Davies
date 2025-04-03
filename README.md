@@ -1,177 +1,153 @@
-Okay, here is a more detailed documentation section, referencing the dissertation's concepts and terminology for clarity.
-
-```markdown
 # Davies' Method Implementation for Mechanism Analysis
 
-This project implements Davies' method for the kinematic and static analysis of mechanical systems using SageMath. The approach combines graph theory for topological representation with screw theory (helicoids) for describing motion and forces, enabling the analysis of complex mechanisms, including those with multiple degrees of freedom.
+An implementation of Davies' method for analyzing planar mechanisms using SageMath. This library enables both kinematic and static analysis through a systematic graph-theory approach.
 
-## Overview (Based on Dissertation)
+## Quick Start
 
-Davies' method provides a systematic framework by decoupling the analysis into distinct kinematic and static phases, while leveraging analogous mathematical structures based on graph theory and screw theory.
+1. Install SageMath 9.0+ from [sagemath.org](https://www.sagemath.org)
 
-1.  **Topological Representation (Graph Theory):**
-    *   The mechanism's connectivity is modeled using a **Coupling Graph (GC)**, where bodies are vertices and direct couplings (joints) are edges.
-    *   The **Incidence Matrix [IC]** of GC is used to derive the fundamental **Cut-set Matrix [QC]** and, via the **Orthogonality Principle**, the fundamental **Circuit Matrix [BC]**. This avoids complex graph traversal algorithms.
-
-2.  **Motion/Action Representation (Screw Theory):**
-    *   Instantaneous motion is represented by **Motion Helicoids / Twists ($^M$)**, comprising angular velocity (ω) and linear velocity (Vp) components.
-    *   Forces and moments are represented by **Action Helicoids / Wrenches ($^A$)**, comprising a force resultant (R) and a couple (Tp) components.
-    *   Each degree of freedom (`f`) of a joint corresponds to a **Unit Twist (ˆ$^M$)**.
-    *   Each constraint component (`c`) of a joint corresponds to a **Unit Wrench (ˆ$^A$)**.
-
-3.  **System Equation Formulation:**
-    *   **Kinematics:**
-        *   The Circuit Matrix [BC] is expanded to `[BM]` based on joint freedoms (`f`) to represent the connectivity of the conceptual **Motion Graph (GM)**.
-        *   Unit Twists are assembled into the **Unit Twist Matrix [M̂D]**.
-        *   The **Network Motion Matrix [M̂N]** is constructed using `[M̂D]` and `[BM]` (Eq. 3.31).
-        *   The governing equation stems from the adapted Kirchhoff's Circuit Law: `[M̂N]{Φ} = {0}` (Eq. 3.32), where `{Φ}` is the vector of unknown twist magnitudes (velocities).
-    *   **Statics:**
-        *   The Cut-set Matrix [QC] is expanded to `[QA]` based on joint constraints (`c = cp + ca`) to represent the connectivity of the conceptual **Action Graph (GA)**. External actions are included as active constraints (`ca`).
-        *   Unit Wrenches are assembled into the **Unit Wrench Matrix [ÂD]**.
-        *   The **Network Action Matrix [ÂN]** is constructed using `[ÂD]` and `[QA]` (Eq. 3.38 analogous structure).
-        *   The governing equation stems from the adapted Kirchhoff's Cut-set Law: `[ÂN]{Ψ} = {0}` (Eq. 3.39), where `{Ψ}` is the vector of unknown wrench magnitudes (constraint forces/torques).
-
-4.  **Solution:**
-    *   The network matrices ([M̂N], [ÂN]) are potentially reduced based on rank (`m` or `a`) to remove redundancies.
-    *   The system is partitioned into known primary variables ({ΦP}, {ΨP} - typically inputs) and unknown secondary variables ({ΦS}, {ΨS}).
-    *   Linear systems `[M̂NS]{ΦS} = -[M̂NP]{ΦP}` (Eq. 3.46) or `[ÂNS]{ΨS} = -[ÂNP]{ΨP}` (Eq. 3.50) are solved for the unknowns.
-
-## Features
-
-*   **Kinematic Analysis:** Calculates relative angular and linear velocities ({Φ}) for all mechanism joints based on specified inputs.
-*   **Static Analysis:** Calculates constraint forces and torques ({Ψ}) within joints necessary to maintain equilibrium under specified applied loads/torques.
-*   **Graph-Based Topology:** Uses Incidence, Cut-set, and Circuit matrices derived from the Coupling Graph (GC).
-*   **Orthogonality Principle:** Leverages `[Q][B]^T = [0]` for efficient matrix generation.
-*   **Screw Theory Representation:** Utilizes planar (λ=3) twists and wrenches.
-*   **Systematic Formulation:** Constructs Network Matrices ([M̂N], [ÂN]) as per the dissertation.
-*   **Redundancy Handling:** Detects and handles dependent equations via rank calculation.
-*   **Planar Joint Support:** Implements Revolute (R) and Prismatic (P) joints. (Extensible to others).
-*   **Reporting:** Optional generation of detailed reports including intermediate matrices for verification.
-*   **Exact Arithmetic:** Primarily uses SageMath's `QQ` (Rational Field) for precision.
-
-## Files
-
-*   `davies_method.py`: Core implementation of graph functions, matrix constructions, twist/wrench calculations, partitioning, solving, and the main `DaviesKinematicAnalysis` and `DaviesStaticAnalysis` functions. Includes reporting helpers.
-*   `run_analysis_with_report.py` (or similar): Example script demonstrating usage for specific mechanisms (e.g., four-bar, slider-crank) and report generation.
-*   `verify_results.py` (optional): Script for comparing results against known analytical or symbolic solutions.
-
-## Usage
-
-### Kinematic Analysis (`davies_method.py`)
+2. Analyze a four-bar mechanism in just a few lines:
 
 ```python
 from davies_method import Mechanism, DaviesKinematicAnalysis
+from sage.all import vector, QQ
 
-# 1. Define Mechanism
-mechanism = Mechanism()
-mechanism.add_joint('a', 0, 1, 'revolute', 1, {'point': vector(QQ,[0,0])}) # Body 0 = ground
-mechanism.add_joint('b', 1, 2, 'revolute', 1, {'point': vector(RDF,[Px,Py])})
-# ... add all bodies and joints with type, DoF (f), and geometry ('point', 'axis'/'direction')
+# Create the mechanism
+m = Mechanism()
+m.add_joint('a', 'ground', 'crank',  'revolute', 1, {'point': vector(QQ,[0,0,0])})
+m.add_joint('b', 'crank',  'coupler', 'revolute', 1, {'point': vector(QQ,[2,0,0])})
+m.add_joint('c', 'coupler', 'rocker', 'revolute', 1, {'point': vector(QQ,[4,2,0])})
+m.add_joint('d', 'rocker', 'ground',  'revolute', 1, {'point': vector(QQ,[0,2,0])})
 
-# 2. Define Inputs
-primary_ids = ['a']      # List of joint IDs for primary inputs
-primary_vals = [QQ(1)]   # List of corresponding velocities (use QQ for exact)
-lambda_dim = 3           # Planar analysis
+# Run kinematic analysis with input at joint 'a' rotating at 1 rad/s
+Phi, edges, report = DaviesKinematicAnalysis(m, ['a'], [QQ(1)], generate_report=True)
 
-# 3. Perform Analysis
-# Returns total magnitude vector {Φ} and ordered list of GM edges
-Phi_total, GM_Edges_Ordered, report = DaviesKinematicAnalysis(
-    mechanism, primary_ids, primary_vals, lambda_dim, generate_report=True
-)
-
-# 4. Process Results
-if Phi_total is not None:
-    print("Kinematic Results {Φ}:")
-    for i, magnitude in enumerate(Phi_total):
-        print(f"  {GM_Edges_Ordered[i][2]}: {N(magnitude, digits=6)}") # Print numerical approx
-    # save_report_to_file(report, 'kinematic_report.txt')
+# Print angular velocities
+print("\nJoint Angular Velocities:")
+for i, edge in enumerate(edges):
+    print(f"{edge[2]}: {float(Phi[i])} rad/s")
 ```
 
-### Static Analysis (`davies_method.py`)
+## Core Concepts
 
+### 1. Mechanism Definition
+
+A mechanism is defined by:
+- Bodies (links)
+- Joints connecting the bodies
+- For each joint:
+  - Type (revolute, prismatic, etc.)
+  - Degrees of Freedom (f)
+  - Geometry (position, axis)
+
+### 2. Kinematic Analysis
+
+Calculates velocities throughout the mechanism:
 ```python
-from davies_method import Mechanism, DaviesStaticAnalysis # Assuming Static is in the same file
+# Example: Slider-crank with input at joint 'a'
+mechanism = Mechanism()
+mechanism.add_joint('a', 'ground', 'crank', 'revolute', 1, 
+                   {'point': vector(QQ,[0,0,0])})
+mechanism.add_joint('b', 'crank', 'rod', 'revolute', 1,
+                   {'point': vector(QQ,[2,0,0])})
+mechanism.add_joint('c', 'rod', 'slider', 'revolute', 1,
+                   {'point': vector(QQ,[5,0,0])})
+mechanism.add_joint('d', 'slider', 'ground', 'prismatic', 1,
+                   {'direction': vector(QQ,[1,0,0])})
 
-# 1. Define Mechanism (same as kinematic, DoF is not strictly needed but constraints 'c' are derived)
-mechanism_static = Mechanism()
-# ... add all bodies and joints with type, and geometry ...
-mechanism_static.add_joint('a', 0, 1, 'revolute', 1, {'point': vector(QQ,[0,0])})
-# ...
+# Analyze with crank rotating at 0.15 rad/s
+Phi, edges, report = DaviesKinematicAnalysis(
+    mechanism, ['a'], [QQ(15)/100], generate_report=True
+)
+```
 
-# 2. Define External Actions & Primary Constraints
-external_actions = {'a': 1, 'd': 1} # e.g., Active torque Tz at 'a', Output reaction torque Tz at 'd'
-                                    # Maps joint_id -> number of *active* constraints 'ca'
+### 3. Static Analysis 
 
-# Define the known forces/torques (ΨP) - NEEDS ROBUST NAMING
-# Names MUST match those generated internally (e.g., 'a_Tz_active', 'd_Tout_reaction')
-primary_constraint_ids = ['a_Tz_active'] # Example: Input torque at 'a' is known
-primary_constraint_values = [QQ(10)]     # Example: 10 Nm input
+Calculates forces and moments for static equilibrium:
+```python
+# Example: Finding reaction forces with input torque
+mechanism = Mechanism()
+# ... add joints as before ...
 
-lambda_dim = 3 # Planar analysis
+# Specify active torque at joint 'a' and reaction at 'd'
+external_actions = {'a': 1, 'd': 1}  
 
-# 3. Perform Analysis
-# Returns total magnitude vector {Ψ} and ordered list of GA constraint IDs
-Psi_total, GA_Constraints_Ordered, report = DaviesStaticAnalysis(
-    mechanism_static,
-    primary_constraint_ids,
-    primary_constraint_values,
+# Apply 10 Nm input torque at joint 'a'
+Psi, constraints, report = DaviesStaticAnalysis(
+    mechanism,
+    ['a_Tz_active'],   # Known constraint
+    [QQ(10)],          # 10 Nm torque
     external_actions,
-    lambda_dim,
     generate_report=True
 )
-
-# 4. Process Results
-if Psi_total is not None:
-    print("Static Results {Ψ}:")
-    for i, magnitude in enumerate(Psi_total):
-        unit = "N" if ("Rx" in GA_Constraints_Ordered[i] or "Ry" in GA_Constraints_Ordered[i]) else "Nm"
-        print(f"  {GA_Constraints_Ordered[i]}: {N(magnitude, digits=6)} {unit}")
-    # save_report_to_file(report, 'static_report.txt')
-
 ```
 
-## Planar Joint Screws (λ=3)
+## Supported Joint Types
 
-Representation: Twist `[ωz, Vpx, Vpy]`, Wrench `[Tz, Rx, Ry]` at Origin Oxyz. Joint at P(Px, Py).
-
-### Revolute (R) Joint (f=1, cp=2)
-*   **Unit Twist (ˆ$^M$):** `[ 1, -Py, Px ]` (for ωz=1)
-*   **Unit Wrenches (ˆ$^A$):**
-    *   Constraint Rx=1 at P: `[ -Py, 1, 0 ]`
-    *   Constraint Ry=1 at P: `[ Px, 0, 1 ]`
-
-### Prismatic (P) Joint (f=1, cp=2)
-*   Axis direction **u** = `[ux, uy]`. Perpendicular **v** = `[-uy, ux]`.
-*   **Unit Twist (ˆ$^M$):** `[ 0, ux, uy ]` (for velocity=1 along **u**)
-*   **Unit Wrenches (ˆ$^A$):**
-    *   Constraint Force=1 along **v** at P: `[ Px*ux + Py*uy, -uy, ux ]`
-    *   Constraint Torque Tz=1: `[ 1, 0, 0 ]`
-
-*(Note: Wrench formula for prismatic force constraint needs careful verification against cross-product rules used in the dissertation)*
-
-### Planar (E) Joint (f=3, cp=0)
-*   **Unit Twists (ˆ$^M$):**
-    *   DoF 0 (RotZ): `[ 1, -Py, Px ]`
-    *   DoF 1 (TransX): `[ 0, 1, 0 ]`
-    *   DoF 2 (TransY): `[ 0, 0, 1 ]`
-*   **Unit Wrenches (ˆ$^A$):** None (passive)
-
-### Fixed (F) Joint (f=0, cp=3)
-*   **Unit Twists (ˆ$^M$):** None
-*   **Unit Wrenches (ˆ$^A$):**
-    *   Constraint Rx=1 at P: `[ -Py, 1, 0 ]`
-    *   Constraint Ry=1 at P: `[ Px, 0, 1 ]`
-    *   Constraint Tz=1 at P: `[ 1, 0, 0 ]`
-
-### Active Actions (Treated as Constraints `ca` in Statics)
-*   **Applied Torque Tz=1 at Joint P:** Unit Wrench ˆ$^A$ = `[ 1, 0, 0 ]`
-*   *(Applied forces would have wrenches like passive constraints but contribute to `ca`)*
-
-## Requirements
-
-*   SageMath 9.0+ (includes Python 3 and NumPy)
-
-## Documentation
-
-Detailed function descriptions are available as docstrings within the `davies_method.py` file. The `run_analysis_with_report.py` script provides practical usage examples. The generated report files offer insight into intermediate calculation steps.
+### Revolute Joint (R)
+- 1 degree of freedom (rotation)
+- 2 constraint components (forces)
+```python
+mechanism.add_joint('a', 'body1', 'body2', 'revolute', 1,
+                   {'point': vector(QQ,[x,y,0])})
 ```
+
+### Prismatic Joint (P)
+- 1 degree of freedom (translation)
+- 2 constraint components (perpendicular force + moment)
+```python
+mechanism.add_joint('p', 'body1', 'body2', 'prismatic', 1,
+                   {'direction': vector(QQ,[ux,uy,0])})
+```
+
+### Planar Joint (E)
+- 3 degrees of freedom (rotation + translation)
+- No constraints
+```python
+mechanism.add_joint('e', 'body1', 'body2', 'planar', 3,
+                   {'point': vector(QQ,[x,y,0])})
+```
+
+## Reporting and Debugging 
+
+1. Generate detailed analysis report:
+```python
+Phi, edges, report = DaviesKinematicAnalysis(..., generate_report=True)
+save_report_to_file(report, 'analysis_report.txt')
+```
+
+2. Report contents include:
+- Mechanism topology
+- Matrix calculations
+- System equations
+- Final results
+
+3. Common issues:
+- Singular matrices: Check mechanism constraints
+- Rank mismatch: Verify number of primary inputs
+- NaN results: Look for numerical precision issues
+
+## Best Practices
+
+1. Use exact arithmetic with `QQ` when possible:
+```python
+from sage.all import QQ
+omega = QQ(1)    # Exact 1
+omega = QQ(1,2)  # Exact 1/2
+```
+
+2. Consistent coordinate systems:
+- Use right-handed coordinate system
+- Z-axis points out of plane
+- Define joint positions relative to global origin
+
+3. Mechanism topology:
+- Start with ground as body 0
+- Number bodies consistently
+- Verify joint connectivity
+
+## Further Reading
+
+- Davies, T. H. "Mechanical Networks" (original paper)
+- Repository examples: See `example.py` and `fourbar_solver.py`
+- Generated reports in `reports/` directory after analysis
