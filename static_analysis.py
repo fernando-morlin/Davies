@@ -1,7 +1,7 @@
 """
 Static analysis module using Davies' method.
 """
-from sage.all import vector, QQ, RDF, N, matrix, SR  # Added SR
+from sage.all import vector, QQ, RDF, N, matrix, SR  # Removed simplify_full import
 from common_utils import Mechanism, get_constraints_for_joint_type, format_vector
 from graph_utils import (
     build_coupling_graph, get_incidence_matrix,
@@ -156,7 +156,19 @@ def format_static_report(report, detailed=False, precision=4):
         for i, magnitude in enumerate(psi_total):
             edge_label = ga_edges[i] if i < len(ga_edges) else f"Constraint_{i}"
             unit = "N" if ("Rx" in edge_label or "Ry" in edge_label or "Rv" in edge_label) else "Nm"
-            lines.append(f"- {edge_label:<12}: {format_vector(vector([magnitude]), precision+1)} {unit}")
+            
+            # Simplify symbolic magnitude before formatting
+            simplified_magnitude = magnitude
+            if hasattr(magnitude, 'parent') and magnitude.parent() is SR:
+                try:
+                    # Use the simplify_full() method directly on the expression
+                    simplified_magnitude = magnitude.simplify_full()
+                except Exception:
+                    # Fallback if simplification fails
+                    simplified_magnitude = magnitude 
+                    
+            # Pass the (potentially simplified) magnitude to format_vector
+            lines.append(f"- {edge_label:<12}: {format_vector(vector([simplified_magnitude]), precision+1)} {unit}")
 
     return "\n".join(lines)
 

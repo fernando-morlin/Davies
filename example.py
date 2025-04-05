@@ -423,6 +423,114 @@ def example_symbolic_fourbar_full():
 
     return mechanism, Phi_solution, None
 
+def example_fully_symbolic_static_fourbar():
+    """Run four-bar linkage static analysis with fully symbolic geometry and input torque."""
+    print_section_header("Fully Symbolic Static Four-Bar Linkage Example")
+
+    # Define symbolic variables for geometry and input torque
+    var('a_x, a_y, b_x, b_y, c_x, c_y, d_x, d_y, T_a_in')
+
+    # Create mechanism using symbolic coordinates and SR ring
+    print("Creating fully symbolic mechanism for static analysis...")
+    mechanism = Mechanism()
+
+    # Add bodies
+    mechanism.add_body(0) # Ground
+    mechanism.add_body(1)
+    mechanism.add_body(2)
+    mechanism.add_body(3)
+
+    # Define all joints with symbolic positions
+    mechanism.add_joint("a", 0, 1       , "revolute", 1, {
+        'point': vector(SR, [a_x, a_y, 0])
+    })
+    mechanism.add_joint("b", 1, 2, "revolute", 1, {
+        'point': vector(SR, [b_x, b_y, 0])
+    })
+    mechanism.add_joint("c", 2, 3, "revolute", 1, {
+        'point': vector(SR, [c_x, c_y, 0])
+    })
+    mechanism.add_joint("d", 3, 0, "revolute", 1, {
+        'point': vector(SR, [d_x, d_y, 0])
+    })
+
+    print(f"Fully symbolic static mechanism created with {len(mechanism.bodies)} bodies and {len(mechanism.joints)} joints.")
+
+    # ===== Fully Symbolic Static Analysis =====
+    print_step_header("Running Fully Symbolic Static Analysis")
+
+    external_actions = {'a': 1, 'd': 1}  # Active torques at a and d
+    primary_constraints = ['a_Tz_active'] # Input torque at 'a' is primary
+    primary_constraint_values = [T_a_in]  # Use symbolic variable T_a_in
+
+    # Run static analysis using the Symbolic Ring (SR)
+    Psi_solution, ordered_ga_constraints, static_report = DaviesStaticAnalysis(
+        mechanism,
+        primary_constraints,
+        primary_constraint_values,
+        external_actions,
+        lambda_dim=3,
+        generate_report=True,
+        ring=SR # Specify SR
+    )
+
+    if Psi_solution is not None:
+        print("\nFully Symbolic Static Analysis Results (Forces/Torques):")
+        symbolic_results = {}
+        for i, val in enumerate(Psi_solution):
+            constraint_id = ordered_ga_constraints[i]
+            # Simplify symbolic results
+            if hasattr(val, 'simplify_full'):
+                simplified_val = val.simplify_full()
+                symbolic_results[constraint_id] = simplified_val
+            else:
+                symbolic_results[constraint_id] = val # Keep as is if not symbolic
+            unit = "N" if ("Rx" in constraint_id or "Ry" in constraint_id or "Rv" in constraint_id) else "Nm"
+            print(f"  {constraint_id:<12} = {symbolic_results[constraint_id]} {unit}")
+
+        # Verify by substituting numerical values matching the verified static case
+        try:
+            subs_dict = {
+                a_x: 0, a_y: 0,
+                b_x: 2, b_y: 0,
+                c_x: 4, c_y: 2,
+                d_x: 0, d_y: 2,
+                T_a_in: 10 # Use numeric value from verified example
+            }
+            subs_results = {}
+            print(f"\nVerifying with geometry a({subs_dict[a_x]},{subs_dict[a_y]}), b({subs_dict[b_x]},{subs_dict[b_y]}), c({subs_dict[c_x]},{subs_dict[c_y]}), d({subs_dict[d_x]},{subs_dict[d_y]}) and T_a_in = {subs_dict[T_a_in]} Nm:")
+
+            for k, v in symbolic_results.items():
+                if hasattr(v, 'subs'):
+                    subs_results[k] = v.subs(subs_dict)
+                else:
+                    subs_results[k] = v # Keep numeric results as they are
+
+            for constraint_id in ordered_ga_constraints:
+                unit = "N" if ("Rx" in constraint_id or "Ry" in constraint_id or "Rv" in constraint_id) else "Nm"
+                try:
+                    # Use N() for numerical evaluation after substitution
+                    print(f"  {constraint_id:<12}: {N(subs_results[constraint_id], digits=8)} {unit}")
+                except TypeError:
+                    print(f"  {constraint_id:<12}: Could not evaluate numerically - {subs_results[constraint_id]} {unit}")
+
+        except Exception as e:
+            print(f"\nCould not substitute numerical values for verification: {e}")
+
+        # Save fully symbolic static report
+        report_path = os.path.join(REPORTS_DIR, "fully_symbolic_fourbar_static_report.txt")
+        save_static_report_to_file(static_report, report_path, detailed=True)
+        print(f"\nFully symbolic static report saved to {report_path}")
+        # Also print report to console
+        print("\n--- Fully Symbolic Static Report ---")
+        print(format_static_report(static_report, detailed=True, precision=8))
+        print("--- End Report ---")
+
+    else:
+        print("Fully symbolic static analysis failed.")
+
+    return mechanism, Psi_solution, None
+
 
 if __name__ == "__main__":
     print_section_header("Davies' Method Examples", char='=')
@@ -434,5 +542,8 @@ if __name__ == "__main__":
     
     # Run the fully symbolic four-bar example
     fully_symbolic_mech, fully_symbolic_kin, _ = example_symbolic_fourbar_full()
+
+    # Run the fully symbolic static four-bar example
+    fully_symbolic_static_mech, fully_symbolic_static_psi, _ = example_fully_symbolic_static_fourbar()
 
     print("\nExamples completed. Reports saved to 'reports' directory.")
