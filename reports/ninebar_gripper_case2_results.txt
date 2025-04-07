@@ -1,0 +1,85 @@
+================================================================================
+                      TYPE SYNTHESIS RESULTS REPORT
+================================================================================
+
+SUMMARY
+----------------------------------------
+Total unique mechanism types found: 1
+Motion space dimension: 3 (Planar)
+Original mechanism: 9 links, 12 joints
+Joints: a, b, c, d, e, f, g, h, i, j, k, l
+
+DESIGN REQUIREMENTS
+----------------------------------------
+Required freedoms:
+  Joint e: Rz
+  Joint f: Rz
+  Joint c: Ty
+  Joint k: Tx
+  Joint l: Ty
+  Joint a: Rz
+  Joint b: Rz
+  Joint d: Rz
+  Joint g: Rz
+  Joint h: Rz
+  Joint i: Rz
+  Joint j: Rz
+Required constraints:
+  Joint e: Tx, Ty
+  Joint f: Tx, Ty
+  Joint a: Tx, Ty
+  Joint b: Tx, Ty
+  Joint d: Tx, Ty
+  Joint g: Tx, Ty
+  Joint h: Tx, Ty
+  Joint i: Tx, Ty
+  Joint j: Tx, Ty
+  Joint c: Tx, Rz
+  Joint l: Tx, Rz
+  Joint k: Ty, Rz
+
+JOINT TYPE REFERENCE
+----------------------------------------
+revolute:       1 DOF, rotation about Z-axis
+prismatic_x:    1 DOF, translation along X-axis
+prismatic_y:    1 DOF, translation along Y-axis
+pin_in_slot_x:  2 DOF, rotation + translation along X-axis
+pin_in_slot_y:  2 DOF, rotation + translation along Y-axis
+planar_trans:   2 DOF, translation along X and Y axes
+planar:         3 DOF, rotation + translation along X and Y axes
+rigid:          0 DOF, fully constrained
+
+DETAILED MECHANISM TYPES
+================================================================================
+
+MECHANISM TYPE #1
+----------------------------------------
+Joint Types:
+  a     : revolute        (1 DOF)
+  b     : revolute        (1 DOF)
+  c     : prismatic_y     (0 DOF)
+  d     : revolute        (1 DOF)
+  e     : revolute        (1 DOF)
+  f     : revolute        (1 DOF)
+  g     : revolute        (1 DOF)
+  h     : revolute        (1 DOF)
+  i     : revolute        (1 DOF)
+  j     : revolute        (1 DOF)
+  k     : prismatic_x     (0 DOF)
+  l     : prismatic_y     (0 DOF)
+
+Mobility: -24
+
+GRIPPER RECOMMENDATIONS:
+Potential contact points: a, b, d, e, f, g, h, i, j
+Potential actuation joints: c, k, l
+Fixed connections: None
+
+Guidance:
+- For grippers, contact points should typically be revolute joints
+- Linear actuation often uses prismatic joints
+- Pin-in-slot joints can provide helpful degrees of freedom for self-alignment
+
+================================================================================
+
+END OF REPORT

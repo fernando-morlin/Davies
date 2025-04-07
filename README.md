@@ -144,6 +144,11 @@ mechanism.add_joint('p', 'body1', 'body2', 'prismatic', 1,
                    {'direction': vector(QQ,[ux,uy,0])})
 ```
 
+### Pin-in-Slot Joint
+- 2 degrees of freedom (rotation + translation along slot)
+- 1 constraint component
+- Automatically determined during type synthesis
+
 ### Planar Joint (E)
 - 3 degrees of freedom (rotation + translation)
 - No constraints
@@ -170,6 +175,50 @@ save_report_to_file(report, 'analysis_report.txt')
 - Singular matrices: Check mechanism constraints
 - Rank mismatch: Verify number of primary inputs
 - NaN results: Look for numerical precision issues
+
+## Type Synthesis
+
+The library includes tools for automated type synthesis using Davies' method and matroid theory:
+
+```python
+from davies_method import Mechanism, DaviesTypeSynthesis
+
+# Create a seed mechanism (topology only)
+mechanism = Mechanism()
+# ...add links and joints...
+
+# Define design requirements (optional)
+design_requirements = {
+    'required_freedoms': {
+        'a': ['Rz'],  # Joint 'a' should be revolute
+        'b': ['Tx']   # Joint 'b' should allow x translation
+    },
+    'required_constraints': {
+        'c': ['Tx', 'Ty']  # Joint 'c' should constrain x,y translation
+    }
+}
+
+# Run type synthesis
+results = DaviesTypeSynthesis(
+    mechanism,
+    design_requirements,
+    lambda_dim=3  # Planar mechanism
+)
+
+# Each result contains a dictionary of joint types
+for i, (joint_types, _) in enumerate(results[:5]):
+    print(f"\nMechanism Type #{i+1}:")
+    for joint_id, joint_type in sorted(joint_types.items()):
+        print(f"  Joint {joint_id}: {joint_type}")
+```
+
+The type synthesis algorithm:
+1. Builds a seed mechanism with virtual joints
+2. Computes the Network Unit Action Matrix
+3. Uses matroid theory to systematically identify all valid constraint patterns
+4. Determines appropriate joint types for each pattern
+
+See examples in the `examples/` directory for more usage details.
 
 ## Best Practices
 

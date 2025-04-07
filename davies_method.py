@@ -20,6 +20,12 @@ from static_analysis import (
     format_static_report
 )
 
+# Re-export type synthesis functionality
+from type_synthesis import (
+    automate_type_synthesis as DaviesTypeSynthesis,
+    save_type_synthesis_results
+)
+
 # Define a version
 __version__ = '1.0.0'
 
@@ -31,4 +37,5 @@ if __name__ == '__main__':
     print("  from davies_method import Mechanism")
     print("  from davies_method import DaviesKinematicAnalysis")
     print("  from davies_method import DaviesStaticAnalysis")
+    print("  from davies_method import DaviesTypeSynthesis")
     print("\nSee example.py for detailed usage examples.")
