@@ -1,6 +1,6 @@
 # Davies' Method Implementation for Mechanism Analysis
 
-An implementation of Davies' method for analyzing planar mechanisms using SageMath. This library enables both kinematic and static analysis through a systematic graph-theory approach, with support for both numeric and symbolic calculations.
+An implementation of Davies' method for analyzing planar and spatial mechanisms using SageMath. This library enables both kinematic and static analysis through a systematic graph-theory approach, with support for both numeric and symbolic calculations, and specialized features for gripper analysis.
 
 ## Quick Start
 
@@ -82,6 +82,30 @@ Psi, constraints, report = DaviesStaticAnalysis(
 )
 ```
 
+#### External Forces and Constraints
+
+The static analysis supports defining external forces and constraints:
+
+```python
+# Define external forces at specific joints
+external_actions = {
+    'a': 1,  # 1 external action at joint 'a' (e.g., input torque)
+    'c': 2   # 2 external actions at joint 'c' (e.g., contact forces)
+}
+
+# Specify known constraint magnitudes
+primary_constraint_ids = ['a_Tz_active', 'c_Rx']  # Torque at 'a', force at 'c'
+primary_values = [QQ(10), QQ(5)]  # 10 Nm torque, 5 N force
+
+Psi, constraints, report = DaviesStaticAnalysis(
+    mechanism,
+    primary_constraint_ids,
+    primary_values,
+    external_actions,
+    generate_report=True
+)
+```
+
 ### 4. Symbolic Analysis
 
 Performs analysis using symbolic variables to produce exact parametric solutions:
@@ -128,7 +152,9 @@ for i, val in enumerate(Phi):
 
 ## Supported Joint Types
 
-### Revolute Joint (R)
+### Planar Mechanism Joints (lambda_dim=3)
+
+#### Revolute Joint (R)
 - 1 degree of freedom (rotation)
 - 2 constraint components (forces)
 ```python
@@ -136,7 +162,7 @@ mechanism.add_joint('a', 'body1', 'body2', 'revolute', 1,
                    {'point': vector(QQ,[x,y,0])})
 ```
 
-### Prismatic Joint (P)
+#### Prismatic Joint (P)
 - 1 degree of freedom (translation)
 - 2 constraint components (perpendicular force + moment)
 ```python
@@ -144,17 +170,115 @@ mechanism.add_joint('p', 'body1', 'body2', 'prismatic', 1,
                    {'direction': vector(QQ,[ux,uy,0])})
 ```
 
-### Pin-in-Slot Joint
+#### Pin-in-Slot Joint
 - 2 degrees of freedom (rotation + translation along slot)
 - 1 constraint component
-- Automatically determined during type synthesis
+- Available as 'pin_in_slot_x' and 'pin_in_slot_y'
+```python
+mechanism.add_joint('p', 'body1', 'body2', 'pin_in_slot_x', 2,
+                   {'point': vector(QQ,[x,y,0])})
+```
 
-### Planar Joint (E)
+#### Planar Joint (E)
 - 3 degrees of freedom (rotation + translation)
 - No constraints
 ```python
 mechanism.add_joint('e', 'body1', 'body2', 'planar', 3,
                    {'point': vector(QQ,[x,y,0])})
+```
+
+### Spatial Mechanism Joints (lambda_dim=6)
+
+#### Revolute Joint
+- 1 degree of freedom (rotation about specified axis)
+- Available as 'revolute_x', 'revolute_y', 'revolute_z'
+
+#### Prismatic Joint
+- 1 degree of freedom (translation along specified axis)
+- Available as 'prismatic_x', 'prismatic_y', 'prismatic_z'
+
+#### Spherical Joint
+- 3 degrees of freedom (rotation about X, Y, and Z axes)
+
+#### Rigid Connection
+- 0 degrees of freedom (fully constrained)
+
+## Gripper Analysis
+
+This library includes specialized features for gripper analysis, including:
+
+### Gripper Type Synthesis
+
+```python
+from davies_method import Mechanism, DaviesTypeSynthesis, save_type_synthesis_results
+
+# Create a gripper seed mechanism
+mechanism = Mechanism()
+mechanism.add_body('ground')
+mechanism.add_body('left_finger')
+mechanism.add_body('right_finger')
+
+# Add virtual joints (will be determined by type synthesis)
+mechanism.add_joint('a', 'ground', 'left_finger', 'planar', 3, {'point': vector(QQ,[0,0,0])})
+mechanism.add_joint('b', 'ground', 'right_finger', 'planar', 3, {'point': vector(QQ,[0,0,0])})
+mechanism.add_joint('c', 'left_finger', 'right_finger', 'planar', 3, {'point': vector(QQ,[1,1,0])})
+
+# Design requirements for gripper mechanism
+design_requirements = {
+    'required_freedoms': {
+        'a': ['Rz'],      # Left finger should rotate
+        'b': ['Rz']       # Right finger should rotate
+    },
+    'required_constraints': {
+        'c': ['Tx', 'Ty'] # Contact point constraints
+    }
+}
+
+# Run type synthesis specifically for grippers
+results = DaviesTypeSynthesis(
+    mechanism,
+    design_requirements,
+    lambda_dim=3
+)
+
+# Save results with gripper-specific recommendations
+save_type_synthesis_results(
+    results, 
+    'gripper_types.txt', 
+    mechanism, 
+    design_requirements,
+    lambda_dim=3,
+    is_gripper=True  # Enable gripper-specific recommendations
+)
+```
+
+### Gripper Static Analysis
+
+For gripper mechanisms, static analysis can be used to calculate:
+- Gripping forces at contact points
+- Required actuation forces/torques
+- Reaction forces at joints
+
+```python
+# Define external actions for gripper analysis
+external_actions = {
+    'c': 1,  # Contact point external force
+    'a': 1   # Actuation force/torque
+}
+
+# Apply a known actuation force and solve for the resulting grip force
+Psi, constraints, report = DaviesStaticAnalysis(
+    mechanism,
+    ['a_Tz_active'],  # Known actuation torque
+    [QQ(10)],         # 10 Nm actuation
+    external_actions,
+    generate_report=True
+)
+
+# Find the grip force at contact point 'c'
+for i, constraint_name in enumerate(constraints):
+    if constraint_name.startswith('c_'):
+        print(f"Grip force at {constraint_name}: {float(Psi[i])} N")
 ```
 
 ## Reporting and Debugging 
@@ -175,6 +299,12 @@ save_report_to_file(report, 'analysis_report.txt')
 - Singular matrices: Check mechanism constraints
 - Rank mismatch: Verify number of primary inputs
 - NaN results: Look for numerical precision issues
+
+4. Static analysis reports:
+```python
+Psi, constraints, report = DaviesStaticAnalysis(..., generate_report=True)
+save_static_report_to_file(report, 'static_analysis.txt')
+```
 
 ## Type Synthesis
 
@@ -218,6 +348,11 @@ The type synthesis algorithm:
 3. Uses matroid theory to systematically identify all valid constraint patterns
 4. Determines appropriate joint types for each pattern
 
+For grippers, it provides additional recommendations:
+- Potential contact points (typically revolute joints)
+- Potential actuation joints (often prismatic joints)
+- Fixed connections
+
 See examples in the `examples/` directory for more usage details.
 
 ## Best Practices
@@ -246,6 +381,11 @@ Phi, edges, report = DaviesKinematicAnalysis(..., ring=SR)
 - Start with ground as body 0
 - Number bodies consistently
 - Verify joint connectivity
+
+5. Gripper-specific considerations:
+- Define potential contact points between fingers
+- Include actuation mechanisms (typically prismatic joints)
+- Consider using pin-in-slot joints for self-alignment
 
 ## Further Reading
 
