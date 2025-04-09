@@ -173,6 +173,79 @@ def compute_network_unit_action_matrix(seed_mechanism, lambda_dim, ring=QQ):
     
     return A_hat_N, GA_Edges_Ordered, gc_edges, ga_edge_map
 
+def calculate_davies_mobility(mechanism, joint_types=None, A_hat_N=None, lambda_dim=3, ring=QQ):
+    """
+    Calculate mobility using Davies' method accounting for redundant constraints.
+    
+    Args:
+        mechanism: A Mechanism object.
+        joint_types: Dictionary mapping joint IDs to their types (from type synthesis).
+        A_hat_N: Pre-computed Network Unit Action Matrix (optional).
+        lambda_dim: Dimension of the motion space (3 for planar, 6 for spatial).
+        ring: Computational ring (QQ, RDF, SR).
+        
+    Returns:
+        Mobility (FN) according to Davies' method and the number of redundant constraints (CN).
+    """
+    # Count bodies and joints
+    n = len(mechanism.bodies)
+    j = len(mechanism.joints)
+    
+    # Sum degrees of freedom from all joints
+    if joint_types:
+        # Calculate DOF from joint types determined through type synthesis
+        total_dof = 0
+        for joint_id, joint_type in joint_types.items():
+            if "revolute" in joint_type or ("prismatic" in joint_type and "pin_in_slot" not in joint_type):
+                dof = 1
+            elif "pin_in_slot" in joint_type:
+                dof = 2
+            elif "planar_trans" in joint_type:
+                dof = 2
+            elif "planar" in joint_type:
+                dof = 3
+            elif "spherical" in joint_type:
+                dof = 3
+            elif "spatial_translation" in joint_type:
+                dof = 3
+            elif "rigid" in joint_type:
+                dof = 0
+            elif "spatial_dof" in joint_type:
+                # Extract DOF from name like "spatial_dof2_custom"
+                try:
+                    dof = int(joint_type.split("dof")[1].split("_")[0])
+                except:
+                    dof = 1  # Default if parsing fails
+            else:
+                dof = 1  # Default
+            total_dof += dof
+    else:
+        # Use DOFs from the original mechanism definition
+        total_dof = sum(mechanism.joint_dof.values())
+    
+    # Calculate redundant constraints (CN) using A_hat_N if provided
+    CN = 0
+    if A_hat_N is not None:
+        # CN = C - rank(A_hat_N)
+        # Where C is total constraints and rank_a is the rank of A_hat_N
+        C = A_hat_N.ncols()
+        rank_a = A_hat_N.rank()
+        CN = C - rank_a
+        
+        print_step("Davies Mobility Analysis", {
+            "Number of Bodies (n)": n,
+            "Number of Joints (j)": j,
+            "Total DOF (∑fi)": total_dof,
+            "Total Constraints (C)": C,
+            "Rank of A_hat_N": rank_a,
+            "Redundant Constraints (CN)": CN
+        })
+    
+    # Apply modified Grübler-Kutzbach formula
+    mobility = lambda_dim * (n - j - 1) + total_dof + CN
+    
+    return mobility, CN
+
 # Step 4: Define the Initial Matroid
 def define_linear_matroid(A_hat_N):
     """
@@ -462,28 +535,35 @@ def determine_joint_types_from_constraint_set(constraint_set, mechanism, constra
 # Step 9: Refine Selection
 def refine_candidate_mechanisms(feasible_mechanisms, design_requirements):
     """
-    Apply further filtering to remove isomorphic or undesired solutions.
+    Refine the candidate mechanisms based on additional criteria.
     
     Args:
-        feasible_mechanisms: List of feasible mechanism candidates.
-        design_requirements: Dictionary of design requirements.
+        feasible_mechanisms: List of candidate mechanisms from matroid analysis.
+        design_requirements: Design requirements (optional).
         
     Returns:
-        Filtered list of feasible mechanisms.
+        Refined list of mechanisms.
     """
-    # This is a placeholder for more sophisticated filtering
-    # For now, we'll just remove potential duplicates based on joint types
+    # For now, just remove duplicates based on joint types
+    seen = set()
+    refined_mechanisms = []
     
-    # Create a unique representation for each mechanism based on sorted joint types
-    unique_mechanisms = {}
-    for i, (joint_types, constraint_set) in enumerate(feasible_mechanisms):
-        # Create a sortable representation of the joint types
-        joint_type_repr = tuple(sorted((j, t) for j, t in joint_types.items()))
+    for mech in feasible_mechanisms:
+        if len(mech) >= 3:  # New format with mobility
+            joint_types, constraint_set, mobility = mech
+        else:  # Old format for backward compatibility
+            joint_types, constraint_set = mech
+            mobility = None
+            
+        # Create a hashable representation of joint types
+        joint_types_tuple = tuple(sorted((j, t) for j, t in joint_types.items()))
         
-        if joint_type_repr not in unique_mechanisms:
-            unique_mechanisms[joint_type_repr] = (joint_types, constraint_set)
-    
-    refined_mechanisms = list(unique_mechanisms.values())
+        if joint_types_tuple not in seen:
+            seen.add(joint_types_tuple)
+            if mobility is not None:
+                refined_mechanisms.append((joint_types, constraint_set, mobility))
+            else:
+                refined_mechanisms.append((joint_types, constraint_set))
     
     print_step("Mechanism Refinement", {
         "Original Count": len(feasible_mechanisms),
@@ -515,7 +595,7 @@ def automate_type_synthesis(mechanism, design_requirements=None, lambda_dim=3, r
         
     Returns:
         List of synthesized self-aligning mechanism types, each as a tuple:
-            (joint_types_dict, constraint_set)
+            (joint_types_dict, constraint_set, mobility)
     """
     print("\n=== AUTOMATED TYPE SYNTHESIS ===\n")
     
@@ -536,6 +616,16 @@ def automate_type_synthesis(mechanism, design_requirements=None, lambda_dim=3, r
     A_hat_N, constraint_names, gc_edges, ga_edge_map = compute_network_unit_action_matrix(
         seed_mechanism, lambda_dim, ring
     )
+    
+    # Calculate mobility using Davies' method
+    davies_mobility, redundant_constraints = calculate_davies_mobility(
+        mechanism, 
+        joint_types=None,  # We don't have joint types yet in this phase
+        A_hat_N=A_hat_N,
+        lambda_dim=lambda_dim,
+        ring=ring
+    )
+    print(f"\nDavies Mobility Analysis: Mobility = {davies_mobility}, Redundant Constraints = {redundant_constraints}")
     
     # Step 4: Define the Initial Matroid
     matroid = define_linear_matroid(A_hat_N)
@@ -573,7 +663,17 @@ def automate_type_synthesis(mechanism, design_requirements=None, lambda_dim=3, r
         joint_types = determine_joint_types_from_constraint_set(
             constraint_set, mechanism, constraint_names, lambda_dim
         )
-        feasible_mechanisms.append((joint_types, constraint_set))
+        
+        # Calculate mobility for this mechanism type
+        mechanism_mobility, _ = calculate_davies_mobility(
+            mechanism, 
+            joint_types=joint_types,
+            A_hat_N=A_hat_N,  # Use the original A_hat_N
+            lambda_dim=lambda_dim,
+            ring=ring
+        )
+        
+        feasible_mechanisms.append((joint_types, constraint_set, mechanism_mobility))
     
     # Step 9: Refine Selection (Optional)
     refined_mechanisms = refine_candidate_mechanisms(feasible_mechanisms, design_requirements)
@@ -582,10 +682,11 @@ def automate_type_synthesis(mechanism, design_requirements=None, lambda_dim=3, r
     print(f"Found {len(refined_mechanisms)} unique mechanism types.")
     
     # Print a summary of the results
-    for i, (joint_types, _) in enumerate(refined_mechanisms[:10]):  # Show at most 10 results
+    for i, (joint_types, _, mobility) in enumerate(refined_mechanisms[:10]):  # Show at most 10 results
         print(f"\nMechanism Type #{i+1}:")
         for joint_id, joint_type in sorted(joint_types.items()):
             print(f"  Joint {joint_id}: {joint_type}")
+        print(f"  Mobility: {mobility}")
     
     if len(refined_mechanisms) > 10:
         print(f"\n... and {len(refined_mechanisms) - 10} more mechanism types.")
@@ -593,19 +694,10 @@ def automate_type_synthesis(mechanism, design_requirements=None, lambda_dim=3, r
     return refined_mechanisms
 
 # Function to save results to file
-def save_type_synthesis_results(results, filename, mechanism=None, design_requirements=None, lambda_dim=3, is_gripper=False):
-    """
-    Save type synthesis results to a file with improved formatting and application guidance.
-    
-    Args:
-        results: List of feasible mechanism types.
-        filename: Path to output file.
-        mechanism: Original Mechanism object (optional).
-        design_requirements: Design requirements used in synthesis (optional).
-        lambda_dim: Dimension of motion space.
-        is_gripper: Whether to include gripper-specific recommendations.
-    """
-    with open(filename, 'w') as f:
+def save_type_synthesis_results(results, filepath, mechanism=None, design_requirements=None, lambda_dim=3, is_gripper=False):
+    """Save type synthesis results to a file."""
+    with open(filepath, 'w') as f:
+        # Write header and summary
         f.write("=" * 80 + "\n")
         f.write("                      TYPE SYNTHESIS RESULTS REPORT\n")
         f.write("=" * 80 + "\n\n")
@@ -660,54 +752,37 @@ def save_type_synthesis_results(results, filename, mechanism=None, design_requir
         f.write("\nDETAILED MECHANISM TYPES\n")
         f.write("=" * 80 + "\n\n")
         
-        for i, (joint_types, constraint_set) in enumerate(results):
-            f.write(f"MECHANISM TYPE #{i+1}\n")
+        for idx, result in enumerate(results):
+            if len(result) >= 3:
+                joint_types, constraint_set, mobility = result
+            else:
+                joint_types, constraint_set = result
+                mobility = None
+                
+            f.write(f"MECHANISM TYPE #{idx+1}\n")
             f.write("-" * 40 + "\n")
-            
-            # Create a table of joint types
             f.write("Joint Types:\n")
+            
             for joint_id, joint_type in sorted(joint_types.items()):
+                # Use correct DOF values based on joint type
                 dof = 0
-                if "revolute" in joint_type or "prismatic" in joint_type and "_" not in joint_type:
+                if "revolute" in joint_type:
                     dof = 1
+                elif "prismatic" in joint_type and "pin_in_slot" not in joint_type:
+                    dof = 1  # Correct DOF for prismatic joints
                 elif "pin_in_slot" in joint_type:
+                    dof = 2
+                elif "planar_trans" in joint_type:
                     dof = 2
                 elif "planar" in joint_type:
                     dof = 3
+                elif "rigid" in joint_type:
+                    dof = 0
                 
-                f.write(f"  {joint_id:<5} : {joint_type:<15} ({dof} DOF)\n")
+                f.write(f"  {joint_id:<5}: {joint_type:<15} ({dof} DOF)\n")
             
-            # Compute mobility
-            if mechanism:
-                mobility = sum(dof for joint_id, joint_type in joint_types.items() 
-                              if "rigid" not in joint_type)
-                mobility -= (lambda_dim * (len(mechanism.bodies) - 1))
-                f.write(f"\nMobility: {mobility}\n")
-            
-            # Gripper-specific recommendations if requested
-            if is_gripper:
-                f.write("\nGRIPPER RECOMMENDATIONS:\n")
-                
-                # Identify potential contact points (revolute joints are good candidates)
-                contact_candidates = [j for j, t in joint_types.items() if "revolute" in t]
-                f.write(f"Potential contact points: {', '.join(contact_candidates) if contact_candidates else 'None'}\n")
-                
-                # Identify potential actuation points (prismatic joints are good candidates)
-                actuation_candidates = [j for j, t in joint_types.items() if "prismatic" in t]
-                f.write(f"Potential actuation joints: {', '.join(actuation_candidates) if actuation_candidates else 'None'}\n")
-                
-                # Identify potential fixed joints (rigid connections)
-                fixed_joints = [j for j, t in joint_types.items() if "rigid" in t]
-                f.write(f"Fixed connections: {', '.join(fixed_joints) if fixed_joints else 'None'}\n")
-                
-                # Provide general guidance
-                f.write("\nGuidance:\n")
-                f.write("- For grippers, contact points should typically be revolute joints\n")
-                f.write("- Linear actuation often uses prismatic joints\n")
-                f.write("- Pin-in-slot joints can provide helpful degrees of freedom for self-alignment\n")
-            
+            if mobility is not None:
+                f.write(f"\nDavies Mobility: {mobility}\n")
             f.write("\n" + "=" * 80 + "\n\n")
         
         f.write("END OF REPORT\n")
-    
-    print(f"Detailed results saved to {filename}")

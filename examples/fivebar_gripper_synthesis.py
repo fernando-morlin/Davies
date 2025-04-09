@@ -14,29 +14,28 @@ from sage.all import vector, QQ
 from itertools import product
 
 def filter_out_rigid_joints(results):
-    """
-    Filter out any mechanism configuration that contains rigid joints.
-    Rigid joints have 0 DOF and are typically not desirable in gripper mechanisms.
-    """
-    if not results:
-        return []
-    
+    """Filter out mechanism types that contain rigid joints."""
     filtered_results = []
-    filtered_count = 0
     
-    for joint_types, other_data in results:
-        has_rigid = False
-        for joint_id, joint_type in joint_types.items():
-            if "rigid" in joint_type:
-                has_rigid = True
-                break
+    for result in results:
+        # Handle both old (2-element) and new (3-element) formats
+        if len(result) >= 3:
+            joint_types, constraint_set, mobility = result
+        else:
+            joint_types, constraint_set = result
+            mobility = None
+        
+        # Check if any joints are rigid
+        has_rigid = any("rigid" in jt for jt in joint_types.values())
         
         if not has_rigid:
-            filtered_results.append((joint_types, other_data))
-        else:
-            filtered_count += 1
+            # Maintain the same format as input
+            if mobility is not None:
+                filtered_results.append((joint_types, constraint_set, mobility))
+            else:
+                filtered_results.append((joint_types, constraint_set))
     
-    print(f"Filtered out {filtered_count} mechanism types containing rigid joints")
+    print(f"Filtered out {len(results) - len(filtered_results)} mechanism types with rigid joints.")
     return filtered_results
 
 def fivebar_gripper_synthesis():
@@ -265,7 +264,13 @@ def categorize_results(results):
     """Helper function to categorize joint types in results"""
     joint_type_categories = {}
     
-    for i, (joint_types, _) in enumerate(results):
+    for i, result in enumerate(results):
+        # Handle both old (2-element) and new (3-element) formats
+        if len(result) >= 3:
+            joint_types, _, _ = result
+        else:
+            joint_types, _ = result
+        
         # Create a signature for this configuration
         signature = []
         for joint_id in sorted(joint_types.keys()):
